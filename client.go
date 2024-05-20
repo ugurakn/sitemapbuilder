@@ -32,21 +32,54 @@ func Build(rawURL string) ([]lp.Link, error) {
 		return nil, fmt.Errorf("invalid root URL (%s): root URL must be absolute with a host, and not a relative path", rawURL)
 	}
 
-	doc, err := getDocFromURL(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	links, err := getLinksFromDoc(url, doc)
-	if err != nil {
-		return nil, err
-	}
-	return links, nil
+	var sitemap []lp.Link
+	getAll(url, &sitemap)
+	return sitemap, nil
+
+	// doc, err := getDocFromURL(rawURL)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// if doc != nil {
+	// 	links, err := getLinksFromDoc(url, doc)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+
+	// 	return links, nil
+	// }
+	// return nil, nil
 }
 
-func getDocFromURL(url string) ([]byte, error) {
+func getAll(URL *url.URL, sm *[]lp.Link) {
+	doc, err := getDocFromURL(URL.String())
+	if err != nil {
+		panic(fmt.Errorf("can't get doc from URL (%v): %v", URL, err))
+	}
+
+	if doc == nil {
+		return
+	}
+
+	links, err := getLinksFromDoc(URL, doc)
+	if err != nil {
+		panic(fmt.Errorf("can't get links from doc: %v", err))
+	}
+
+	for _, l := range links {
+		fmt.Printf("found: %s\n", l.Href)
+
+		*sm = append(*sm, l)
+		getAll(URL, sm)
+	}
+
+}
+
+func getDocFromURL(URL string) ([]byte, error) {
 	c := getClient()
 
-	resp, err := c.Get(url)
+	resp, err := c.Get(URL)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +114,7 @@ func getLinksFromDoc(url *url.URL, doc []byte) ([]lp.Link, error) {
 	for _, l := range allLinks {
 		linkURL, _ := url.Parse(l.Href)
 		if linkURL.Scheme == scheme && linkURL.Hostname() == host && !strings.Contains(l.Href, "#") {
+			l.Href = linkURL.String()
 			links = append(links, l)
 		}
 	}
