@@ -11,49 +11,43 @@ import (
 	lp "github.com/ugurakn/go-html-link-parser"
 )
 
+type SMB struct {
+	URL     *url.URL
+	Sitemap []lp.Link
+}
+
 func getClient() *http.Client {
 	c := &http.Client{}
 
 	return c
 }
 
-// Build builds a sitemap using the rawURL as the root URL.
-// It only includes links to the same scheme and host.
-// NB for now, it returns a []Link.
-func Build(rawURL string) ([]lp.Link, error) {
+func New(rawURL string) (*SMB, error) {
 	// validate main url. ensure it has a host and is abs,
 	// and is not a relative path
-	url, err := url.Parse(rawURL)
+	URL, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing raw URL (%s): %v", rawURL, err)
 	}
 
-	if !url.IsAbs() || url.Hostname() == "" {
+	if !URL.IsAbs() || URL.Hostname() == "" {
 		return nil, fmt.Errorf("invalid root URL (%s): root URL must be absolute with a host, and not a relative path", rawURL)
 	}
 
-	var sitemap []lp.Link
-	getAll(url, &sitemap)
-	return sitemap, nil
-
-	// doc, err := getDocFromURL(rawURL)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// if doc != nil {
-	// 	links, err := getLinksFromDoc(url, doc)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-
-	// 	return links, nil
-	// }
-	// return nil, nil
+	var l []lp.Link
+	return &SMB{URL, l}, nil
 }
 
-func getAll(URL *url.URL, sm *[]lp.Link) {
-	doc, err := getDocFromURL(URL.String())
+// Build builds a sitemap using the rawURL as the root URL.
+// It only includes links to the same scheme and host.
+// NB for now, it returns a []Link.
+func (smb *SMB) Build() error {
+	smb.getAll(smb.URL.String())
+	return nil
+}
+
+func (smb *SMB) getAll(URL string) {
+	doc, err := getDocFromURL(URL)
 	if err != nil {
 		panic(fmt.Errorf("can't get doc from URL (%v): %v", URL, err))
 	}
@@ -62,7 +56,7 @@ func getAll(URL *url.URL, sm *[]lp.Link) {
 		return
 	}
 
-	links, err := getLinksFromDoc(URL, doc)
+	links, err := smb.getLinksFromDoc(doc)
 	if err != nil {
 		panic(fmt.Errorf("can't get links from doc: %v", err))
 	}
@@ -70,10 +64,9 @@ func getAll(URL *url.URL, sm *[]lp.Link) {
 	for _, l := range links {
 		fmt.Printf("found: %s\n", l.Href)
 
-		*sm = append(*sm, l)
-		getAll(URL, sm)
+		smb.Sitemap = append(smb.Sitemap, l)
+		smb.getAll(l.Href)
 	}
-
 }
 
 func getDocFromURL(URL string) ([]byte, error) {
@@ -101,19 +94,22 @@ func getDocFromURL(URL string) ([]byte, error) {
 	return nil, nil
 }
 
-func getLinksFromDoc(url *url.URL, doc []byte) ([]lp.Link, error) {
-	scheme := url.Scheme
-	host := url.Hostname()
-
+func (smb *SMB) getLinksFromDoc(doc []byte) ([]lp.Link, error) {
 	allLinks, err := lp.Parse(bytes.NewReader(doc))
 	if err != nil {
 		return nil, fmt.Errorf("error getting links from doc: %v", err)
 	}
+
 	// only include links to the same host
 	var links []lp.Link
 	for _, l := range allLinks {
 		linkURL, _ := url.Parse(l.Href)
-		if linkURL.Scheme == scheme && linkURL.Hostname() == host && !strings.Contains(l.Href, "#") {
+
+		if !linkURL.IsAbs() && linkURL.Host == "" {
+			linkURL = smb.URL.ResolveReference(linkURL)
+		}
+
+		if linkURL.Scheme == smb.URL.Scheme && linkURL.Hostname() == smb.URL.Hostname() && !strings.Contains(l.Href, "#") {
 			l.Href = linkURL.String()
 			links = append(links, l)
 		}
