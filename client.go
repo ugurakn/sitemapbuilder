@@ -1,7 +1,6 @@
 package sitemapbuilder
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,8 +22,7 @@ func getClient() *http.Client {
 }
 
 func New(rawURL string) (*SMB, error) {
-	// validate main url. ensure it has a host and is abs,
-	// and is not a relative path
+	// validate main url. ensure it has a host and is absolute
 	URL, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing raw URL (%s): %v", rawURL, err)
@@ -62,21 +60,21 @@ func (smb *SMB) getAll(URL string) {
 	}
 
 	for _, l := range links {
-		fmt.Printf("found: %s\n", l.Href)
+		// TODO do not search duplicates
 
 		smb.Sitemap = append(smb.Sitemap, l)
 		smb.getAll(l.Href)
 	}
 }
 
-func getDocFromURL(URL string) ([]byte, error) {
+func getDocFromURL(URL string) (io.ReadCloser, error) {
 	c := getClient()
 
 	resp, err := c.Get(URL)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// defer resp.Body.Close()
 
 	cType := resp.Header.Get("content-type")
 
@@ -84,18 +82,15 @@ func getDocFromURL(URL string) ([]byte, error) {
 	// fmt.Println(cType)
 
 	if resp.StatusCode == 200 && strings.Contains(cType, "text/html") {
-		doc, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("error reading response body: %v", err)
-		}
-		return doc, nil
+		return resp.Body, nil
 	}
 
 	return nil, nil
 }
 
-func (smb *SMB) getLinksFromDoc(doc []byte) ([]lp.Link, error) {
-	allLinks, err := lp.Parse(bytes.NewReader(doc))
+func (smb *SMB) getLinksFromDoc(doc io.ReadCloser) ([]lp.Link, error) {
+	allLinks, err := lp.Parse(doc)
+	doc.Close()
 	if err != nil {
 		return nil, fmt.Errorf("error getting links from doc: %v", err)
 	}
@@ -103,7 +98,10 @@ func (smb *SMB) getLinksFromDoc(doc []byte) ([]lp.Link, error) {
 	// only include links to the same host
 	var links []lp.Link
 	for _, l := range allLinks {
-		linkURL, _ := url.Parse(l.Href)
+		linkURL, err := url.Parse(l.Href)
+		if err != nil {
+			return nil, fmt.Errorf("can't parse URL (%v): %v", l.Href, err)
+		}
 
 		if !linkURL.IsAbs() && linkURL.Host == "" {
 			linkURL = smb.URL.ResolveReference(linkURL)
