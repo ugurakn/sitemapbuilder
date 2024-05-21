@@ -11,46 +11,44 @@ import (
 )
 
 type SMB struct {
-	URL     *url.URL
-	Sitemap []string
-	Visited map[string]struct{}
+	URL      *url.URL
+	maxDepth int
+	Sitemap  []string
+	Visited  map[string]struct{}
 }
 
-func getClient() *http.Client {
-	c := &http.Client{}
-
-	return c
-}
-
-func New(rawURL string) (*SMB, error) {
+func New(rawURL string, maxDepth int) (*SMB, error) {
 	// remove trailing slash if it exists
 	rawURL = removeTrailingSlash(rawURL)
 
 	// validate root url. ensure it has a host and is absolute
 	URL, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing raw URL (%s): %v", rawURL, err)
+		return nil, fmt.Errorf("error parsing URL string (%s): %v", rawURL, err)
 	}
 
 	if !URL.IsAbs() || URL.Hostname() == "" {
-		return nil, fmt.Errorf("invalid root URL (%s): root URL must be absolute with a host, and not a relative path", rawURL)
+		return nil, fmt.Errorf("invalid root URL (%s): root URL must be a valid absolute path", rawURL)
 	}
+
+	fmt.Printf("scheme: %s, host: %s\n", URL.Scheme, URL.Hostname())
 
 	var l []string
 	v := make(map[string]struct{})
-	return &SMB{URL, l, v}, nil
+	return &SMB{URL, maxDepth, l, v}, nil
 }
 
 func (smb *SMB) Build() error {
-	smb.getAll(smb.URL.String())
+	smb.getAll(smb.URL.String(), 0)
 
 	return nil
 }
 
-func (smb *SMB) getAll(URL string) {
-	if _, ok := smb.Visited[URL]; ok {
+func (smb *SMB) getAll(URL string, depth int) {
+	if _, ok := smb.Visited[URL]; ok || depth > smb.maxDepth {
 		return
 	}
+	fmt.Println(URL) // FOR TESTING
 	smb.Sitemap = append(smb.Sitemap, URL)
 	smb.Visited[URL] = struct{}{}
 
@@ -68,15 +66,14 @@ func (smb *SMB) getAll(URL string) {
 		panic(fmt.Errorf("can't get links from doc: %v", err))
 	}
 
+	depth++
 	for _, l := range links {
-		smb.getAll(l)
+		smb.getAll(l, depth)
 	}
 }
 
 func getDocFromURL(URL string) (io.ReadCloser, error) {
-	c := getClient()
-
-	resp, err := c.Get(URL)
+	resp, err := http.Get(URL)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +95,7 @@ func (smb *SMB) getLinksFromDoc(doc io.ReadCloser) ([]string, error) {
 	}
 
 	// only include links to the same host
-	var links []string
+	links := make([]string, 0, len(allLinks))
 	for _, link := range allLinks {
 		linkURL, err := url.Parse(link.Href)
 		if err != nil {
