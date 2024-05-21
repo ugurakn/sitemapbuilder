@@ -1,14 +1,18 @@
 package sitemapbuilder
 
 import (
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	lp "github.com/ugurakn/go-html-link-parser"
 )
+
+const xmlns = "http://www.sitemaps.org/schemas/sitemap/0.9"
 
 type SMB struct {
 	URL      *url.URL
@@ -31,15 +35,40 @@ func New(rawURL string, maxDepth int) (*SMB, error) {
 		return nil, fmt.Errorf("invalid root URL (%s): root URL must be a valid absolute path", rawURL)
 	}
 
-	fmt.Printf("scheme: %s, host: %s\n", URL.Scheme, URL.Hostname())
-
 	var l []string
 	v := make(map[string]struct{})
 	return &SMB{URL, maxDepth, l, v}, nil
 }
 
+type loc struct {
+	Value string `xml:"loc"`
+}
+
+type urlset struct {
+	Urls  []loc  `xml:"url"`
+	Xmlns string `xml:"xmlns,attr"`
+}
+
 func (smb *SMB) Build() error {
 	smb.getAll(smb.URL.String(), 0)
+
+	// build the xml
+	toXml := urlset{
+		Urls:  make([]loc, len(smb.Sitemap)),
+		Xmlns: xmlns,
+	}
+
+	for i, link := range smb.Sitemap {
+		toXml.Urls[i] = loc{link}
+	}
+
+	fmt.Print(xml.Header)
+	enc := xml.NewEncoder(os.Stdout)
+	enc.Indent("", "  ")
+	err := enc.Encode(toXml)
+	if err != nil {
+		return fmt.Errorf("xml marshal failed: %v", err)
+	}
 
 	return nil
 }
@@ -48,7 +77,6 @@ func (smb *SMB) getAll(URL string, depth int) {
 	if _, ok := smb.Visited[URL]; ok || depth > smb.maxDepth {
 		return
 	}
-	fmt.Println(URL) // FOR TESTING
 	smb.Sitemap = append(smb.Sitemap, URL)
 	smb.Visited[URL] = struct{}{}
 
